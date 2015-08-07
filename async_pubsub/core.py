@@ -1,15 +1,19 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import multiprocessing
+
 import channel
 
 class Core(object):
   """
   Middleware singleton class between publishers and subscribers.
-  You'll want to register all pubs and subs through this.
+  You'll want to register all publishers and subscribers through this.
   """
   def __init__(self):
-    self.channels = channel.Channel(name='root')
+    self.channels = channel.Channel(core=self, name='root')
+    self.manager = multiprocessing.Manager()
+    self.listener_queues = self.manager.dict()
 
   def parse_channel_hierarchy(self, channel):
     """
@@ -34,6 +38,13 @@ class Core(object):
     Convenience method for get_channel.
     """
     return self.get_channel(channel)
+
+  def listener_queue(self, listener):
+    # reserves a new queue for a given listener, if it doesn't exist already.
+    # returns the listener's queue.
+    if listener not in self.listener_queues:
+      self.listener_queues[listener] = self.manager.Queue()
+    return self.listener_queues[listener]
 
   def subscribe(self, listener, channel):
     """

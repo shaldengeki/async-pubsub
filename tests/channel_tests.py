@@ -7,8 +7,10 @@ import async_pubsub
 class BasicListener(object):
   def __init__(self):
     self.x = multiprocessing.Queue()
-  def listen(self, x):
-    self.x.put(x.get())
+  def __call__(self, channel, queue):
+    return self.listen(channel, queue)
+  def listen(self, channel, queue):
+    self.x.put(queue.get())
 
 class testChannelClass(object):
   @classmethod
@@ -21,14 +23,14 @@ class testChannelClass(object):
     assert isinstance(self.root_channel['does-not-exist'], async_pubsub.Channel)
 
   def test_clear_channel_forcibly(self):
-    self.root_channel.subscribe(self.listener.listen)
+    self.root_channel.subscribe(self.listener)
     self.root_channel.clear(force=True)
     assert len(self.root_channel.listeners) == 0
     assert len(self.root_channel.listen_queues) == 0
 
   def test_subscribe_with_valid_channel(self):
     self.root_channel.clear(force=True)
-    p = self.root_channel.subscribe(self.listener.listen)
+    p = self.root_channel.subscribe(self.listener)
     p.start()
     assert len(self.root_channel.listeners) == 1
     assert len(self.root_channel.listen_queues) == 1
@@ -37,8 +39,8 @@ class testChannelClass(object):
 
   def test_publish_message(self):
     self.root_channel.clear(force=True)
-    p = self.root_channel.subscribe(self.listener.listen)
+    p = self.root_channel.subscribe(self.listener)
     p.start()
-    self.root_channel.publish("test message")
+    self.root_channel.publish(self.listener, "test message")
     assert self.listener.x.get() == "test message"
     p.terminate()

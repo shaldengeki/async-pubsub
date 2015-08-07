@@ -8,17 +8,32 @@ class Channel(collections.defaultdict):
   """
   Channel class.
   """
-  def __init__(self, name=None, parent=None):
+  def __key(self):
+    return tuple(self.name_hierarchy())
+
+  def __eq__(x, y):
+    return type(x) == type(y) and x.__key() == y.__key()
+
+  def __hash__(self):
+    return hash(self.__key())
+
+  def __str__(self):
+    return "<Channel(" + self.name + ")>"
+
+  def __repr__(self):
+    return str(self)
+
+  def __init__(self, core=None, name=None, parent=None):
+    self.core = core
     self.name = name
     self.parent = parent
-    self.listeners = []
-    self.listen_queues = []
+    self.listeners = {}
 
   def __missing__(self, key):
-    ret = self[key] = Channel(name=key, parent=self)
+    ret = self[key] = Channel(core=self.core, name=key, parent=self)
     return ret
 
-  def fully_qualified_name(self):
+  def name_hierarchy(self):
     hierarchy = []
     curr_chan = self
     while True:
@@ -26,17 +41,18 @@ class Channel(collections.defaultdict):
       if curr_chan.parent is None:
         break
       curr_chan = curr_chan.parent
-    return ".".join(reversed(hierarchy))
+    return reversed(hierarchy)
+
+  def fully_qualified_name(self):
+    return ".".join(self.name_hierarchy())
 
   def publish(self, message):
     """
-    Publishes the given arguments under the current channel.
+    Publishes a given message under the current channel.
     Also publishes under the parent channel, if one exists.
     """
-    for q in self.listen_queues:
-      print "PUTTING MESSAGE"
-      print message
-      q.put(message)
+    for listener,queue in self.listeners.iteritems():
+      queue.put(message)
 
     if self.parent is not None:
       self.parent.publish(message)
@@ -45,35 +61,31 @@ class Channel(collections.defaultdict):
 
   def subscribe(self, listener):
     """
-    Subscribes to the current channel with the given listener.
-    Returns the created process.
+    Subscribes the given listener to this channel.
     """
-    # reserve a new queue for this listener.
-    self.listen_queues.append(multiprocessing.JoinableQueue())
-    p = multiprocessing.Process(target=listener, args=(self.listen_queues[-1],))
-    self.listeners.append(p)
-    return p
+    # reserve a new listener queue for this listener.
+    self.listeners[listener] = self.core.listener_queue(listener)
+    return self.listeners[listener]
+
+  def unsubscribe(self, listener):
+    """
+    Unsubscribes a given listener from the current channel.
+    """
+    del self.listeners[listener]
 
   def join(self):
     """
     Blocks until all jobs in this channel are done.
     """
-    for q in self.listen_queues:
-      q.join()
+    for listener,queue in self.listeners.iteritems():
+      queue.join()
 
-  def clear(self, force=False):
+  def clear(self):
     """
     Sends all listeners on the current channel a quit signal.
-    If force is True, forcibly-terminates processes.
-    Otherwise, blocks until processes complete.
+    Blocks until processes complete.
     """
-    if force:
-      for p in self.listeners:
-        if p.is_alive():
-          p.terminate()
-    else:
-      for q in self.listen_queues:
-        q.put("QUIT", False)
-      self.join()
-    self.listeners = []
-    self.listen_queues = []
+    for listener,queue in self.listeners.iteritems():
+      queue.put("QUIT", False)
+    self.join()
+    self.listeners = {}
